@@ -32,6 +32,14 @@ pipeline_retry_total = Counter(
     "pipeline_retry_total",
     "Total number of pipeline retry attempts.",
 )
+stale_documents_recovered_total = Counter(
+    "stale_documents_recovered_total",
+    "Total number of stale documents recovered to failed status.",
+)
+pipeline_recovery_runs_total = Counter(
+    "pipeline_recovery_runs_total",
+    "Total number of stale document recovery runs.",
+)
 ocr_requests_total = Counter(
     "ocr_requests_total",
     "Total number of OCR requests sent by the worker.",

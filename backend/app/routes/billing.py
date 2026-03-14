@@ -1,9 +1,13 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config.settings import settings
 from app.db.session import get_db
+from app.models.billing_webhook_event import BillingWebhookEvent
 from app.models.plan import Plan
 from app.models.tenant import Tenant
 from app.schemas.billing import CheckoutRequest, CheckoutResponse, PortalResponse, WebhookResponse
@@ -14,6 +18,20 @@ from app.services.audit_service import log_event
 
 
 router = APIRouter()
+WEBHOOK_STATUS_RECEIVED = "received"
+WEBHOOK_STATUS_PROCESSED = "processed"
+WEBHOOK_STATUS_REJECTED = "rejected"
+
+
+def _set_webhook_event_status(
+    db: Session,
+    event_record: BillingWebhookEvent,
+    status_value: str,
+) -> None:
+    event_record.status = status_value
+    event_record.processed_at = datetime.now(timezone.utc)
+    db.add(event_record)
+    db.commit()
 
 
 @router.post("/checkout", response_model=CheckoutResponse)
@@ -65,25 +83,144 @@ def create_portal(
 async def billing_webhook(
     request: Request,
     stripe_signature: str | None = Header(default=None, alias="Stripe-Signature"),
+    db: Session = Depends(get_db),
 ) -> WebhookResponse:
     payload = await request.body()
     provider = get_billing_provider()
-    normalized_event = provider.handle_webhook(payload=payload, signature=stripe_signature)
+    try:
+        normalized_event = provider.handle_webhook(payload=payload, signature=stripe_signature)
+    except HTTPException as exc:
+        log_event(
+            event="billing_webhook_rejected",
+            tenant_id="",
+            document_id="",
+            status=str(exc.status_code),
+            provider=settings.BILLING_PROVIDER.strip().lower(),
+            event_type="",
+        )
+        raise
 
     tenant_id = str(normalized_event.get("tenant_id", "")) if normalized_event.get("tenant_id") else ""
+    provider_name = str(normalized_event.get("provider", ""))
+    external_event_id_raw = normalized_event.get("external_event_id")
+    if not isinstance(external_event_id_raw, str) or not external_event_id_raw:
+        log_event(
+            event="billing_webhook_rejected",
+            tenant_id=tenant_id,
+            document_id="",
+            status=WEBHOOK_STATUS_REJECTED,
+            provider=provider_name,
+            event_type=str(normalized_event.get("event_type", "")),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing external event identifier.",
+        )
+    external_event_id = external_event_id_raw
     event_type = str(normalized_event.get("event_type", ""))
-    event_status = str(normalized_event.get("status", "received"))
+    event_status = str(normalized_event.get("status", WEBHOOK_STATUS_RECEIVED))
     log_event(
         event="billing_webhook_received",
         tenant_id=tenant_id,
         document_id="",
         status=event_status,
-        provider=str(normalized_event.get("provider", "")),
+        provider=provider_name,
         event_type=event_type,
     )
 
-    if normalized_event.get("ignored"):
-        return WebhookResponse(**normalized_event)
+    event_record = BillingWebhookEvent(
+        provider=provider_name,
+        external_event_id=external_event_id,
+        event_type=event_type,
+        status=WEBHOOK_STATUS_RECEIVED,
+    )
+    db.add(event_record)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing_event = db.execute(
+            select(BillingWebhookEvent).where(
+                BillingWebhookEvent.provider == provider_name,
+                BillingWebhookEvent.external_event_id == external_event_id,
+            )
+        ).scalar_one_or_none()
+        if existing_event is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Duplicate webhook event conflict.",
+            )
+        return WebhookResponse(
+            provider=provider_name,
+            received=True,
+            verified=bool(normalized_event.get("verified", False)),
+            event_type=event_type,
+            tenant_id=tenant_id or None,
+            status=existing_event.status,
+            ignored=True,
+        )
 
-    application_result = apply_billing_event(normalized_event)
-    return WebhookResponse(**application_result)
+    try:
+        if normalized_event.get("ignored"):
+            _set_webhook_event_status(
+                db=db,
+                event_record=event_record,
+                status_value=WEBHOOK_STATUS_PROCESSED,
+            )
+            log_event(
+                event="billing_webhook_processed",
+                tenant_id=tenant_id,
+                document_id="",
+                status=WEBHOOK_STATUS_PROCESSED,
+                provider=provider_name,
+                event_type=event_type,
+            )
+            return WebhookResponse(**normalized_event)
+
+        application_result = apply_billing_event(normalized_event)
+        _set_webhook_event_status(
+            db=db,
+            event_record=event_record,
+            status_value=WEBHOOK_STATUS_PROCESSED,
+        )
+        log_event(
+            event="billing_webhook_processed",
+            tenant_id=tenant_id,
+            document_id="",
+            status=WEBHOOK_STATUS_PROCESSED,
+            provider=provider_name,
+            event_type=event_type,
+        )
+        return WebhookResponse(**application_result)
+    except HTTPException:
+        db.rollback()
+        _set_webhook_event_status(
+            db=db,
+            event_record=event_record,
+            status_value=WEBHOOK_STATUS_REJECTED,
+        )
+        log_event(
+            event="billing_webhook_rejected",
+            tenant_id=tenant_id,
+            document_id="",
+            status=WEBHOOK_STATUS_REJECTED,
+            provider=provider_name,
+            event_type=event_type,
+        )
+        raise
+    except Exception:
+        db.rollback()
+        _set_webhook_event_status(
+            db=db,
+            event_record=event_record,
+            status_value=WEBHOOK_STATUS_REJECTED,
+        )
+        log_event(
+            event="billing_webhook_rejected",
+            tenant_id=tenant_id,
+            document_id="",
+            status=WEBHOOK_STATUS_REJECTED,
+            provider=provider_name,
+            event_type=event_type,
+        )
+        raise

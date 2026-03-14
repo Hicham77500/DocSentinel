@@ -15,10 +15,10 @@ def log_event(
     status: str,
     fraud_score: float | None = None,
     document_type: str | None = None,
-    bundle_id: str | None = None,
-    anomaly_count: int | None = None,
     provider: str | None = None,
     event_type: str | None = None,
+    anomaly_count: int | None = None,
+    bundle_id: str | None = None,
 ) -> None:
     payload = {
         "timestamp": datetime.now(timezone.utc).isoformat(),

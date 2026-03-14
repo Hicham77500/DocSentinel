@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import logging
+import re
 import uuid
 
 from fastapi import HTTPException, status
 
 from app.config.settings import settings
+from app.services.audit_service import log_event
 from app.services.billing.base import BillingProvider
 
 
@@ -16,6 +19,9 @@ SUPPORTED_WEBHOOK_EVENTS = {
     "subscription.deleted",
 }
 SUPPORTED_SUBSCRIPTION_STATUSES = {"trial", "active", "past_due", "canceled"}
+SIGNATURE_TIMESTAMP_TOLERANCE_SECONDS = 300
+SIGNATURE_V1_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
+logger = logging.getLogger("docsentinel.billing")
 
 
 def _to_iso8601_utc(value: object, field_name: str) -> str:
@@ -111,6 +117,126 @@ def _extract_external_id(payload: dict, data_object: dict) -> str:
     )
 
 
+def _extract_event_id(payload: dict) -> str:
+    event_id = payload.get("id")
+    if isinstance(event_id, str) and event_id:
+        return event_id
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Missing external event identifier.",
+    )
+
+
+def _parse_signature_header(signature: str) -> tuple[int, list[str]]:
+    pairs = [segment.strip() for segment in signature.split(",") if segment.strip()]
+    if not pairs:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Malformed webhook signature.",
+        )
+
+    timestamp: int | None = None
+    v1_digests: list[str] = []
+
+    for pair in pairs:
+        key, separator, value = pair.partition("=")
+        if separator != "=":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Malformed webhook signature.",
+            )
+        key = key.strip()
+        value = value.strip()
+        if not key or not value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Malformed webhook signature.",
+            )
+        if key == "t":
+            try:
+                timestamp = int(value)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Malformed webhook signature.",
+                ) from exc
+        if key == "v1":
+            if not SIGNATURE_V1_PATTERN.fullmatch(value):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Malformed webhook signature.",
+                )
+            v1_digests.append(value)
+
+    if timestamp is None or not v1_digests:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Malformed webhook signature.",
+        )
+
+    return timestamp, v1_digests
+
+
+def _verify_signature(payload: bytes, signature: str | None) -> bool:
+    webhook_secret = settings.STRIPE_WEBHOOK_SECRET.strip()
+    if not webhook_secret:
+        if settings.BILLING_ALLOW_INSECURE_WEBHOOKS:
+            logger.warning(
+                "Stripe webhook verification is running in insecure mode because "
+                "STRIPE_WEBHOOK_SECRET is not configured."
+            )
+            log_event(
+                event="billing_webhook_insecure_mode",
+                tenant_id="",
+                document_id="",
+                status="warning",
+                provider="stripe",
+                event_type="",
+            )
+            return False
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe webhook verification is not configured.",
+        )
+
+    if not signature:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing webhook signature.",
+        )
+
+    timestamp, _ = _parse_signature_header(signature)
+    now_timestamp = int(datetime.now(timezone.utc).timestamp())
+    if abs(now_timestamp - timestamp) > SIGNATURE_TIMESTAMP_TOLERANCE_SECONDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Webhook signature timestamp is outside tolerance.",
+        )
+
+    try:
+        import stripe
+    except ModuleNotFoundError as exc:
+        # TODO: Replace with mandatory Stripe SDK verification in production.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe SDK is required for webhook signature verification.",
+        ) from exc
+
+    try:
+        stripe.Webhook.construct_event(
+            payload=payload,
+            sig_header=signature,
+            secret=webhook_secret,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid webhook signature.",
+        ) from exc
+
+    return True
+
+
 class StripeBillingProvider(BillingProvider):
     def __init__(self) -> None:
         if not settings.STRIPE_SECRET_KEY:
@@ -156,11 +282,13 @@ class StripeBillingProvider(BillingProvider):
         }
 
     def handle_webhook(self, payload: bytes, signature: str | None) -> dict:
-        if settings.STRIPE_WEBHOOK_SECRET and not signature:
+        if not payload:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Missing webhook signature.",
+                detail="Invalid webhook payload.",
             )
+
+        verified = _verify_signature(payload=payload, signature=signature)
 
         try:
             parsed_payload = json.loads(payload.decode("utf-8"))
@@ -183,12 +311,13 @@ class StripeBillingProvider(BillingProvider):
                 detail="Invalid webhook event type.",
             )
 
-        verified = bool(signature) or not bool(settings.STRIPE_WEBHOOK_SECRET)
+        external_event_id = _extract_event_id(parsed_payload)
         if event_type not in SUPPORTED_WEBHOOK_EVENTS:
             return {
                 "provider": "stripe",
                 "received": True,
                 "verified": verified,
+                "external_event_id": external_event_id,
                 "event_type": event_type,
                 "ignored": True,
             }
@@ -221,6 +350,7 @@ class StripeBillingProvider(BillingProvider):
             "provider": "stripe",
             "received": True,
             "verified": verified,
+            "external_event_id": external_event_id,
             "event_type": event_type,
             "tenant_id": tenant_id,
             "plan_code": plan_code,

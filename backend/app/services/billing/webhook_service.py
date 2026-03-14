@@ -125,7 +125,11 @@ def apply_billing_event(event: dict) -> dict:
             db.add(subscription)
             db.flush()
         else:
-            subscription.tenant_id = tenant.id
+            if subscription.tenant_id != tenant.id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Subscription external_id is already owned by another tenant.",
+                )
             subscription.plan_id = plan.id
             subscription.status = subscription_status
             subscription.current_period_start = period_start
@@ -153,7 +157,7 @@ def apply_billing_event(event: dict) -> dict:
     summary = {
         "provider": provider,
         "received": True,
-        "verified": True,
+        "verified": bool(event.get("verified", False)),
         "event_type": event_type,
         "tenant_id": tenant_id,
         "subscription_id": str(subscription.id),
