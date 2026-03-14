@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg[binary]
+pydantic
+minio
+celery
+redis
+python-multipart
+pytesseract
+Pillow
+pdf2image
+python-magic
+clamd
+prometheus-client
