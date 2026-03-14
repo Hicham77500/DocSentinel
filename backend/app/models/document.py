@@ -30,6 +30,12 @@ class Document(Base):
         nullable=False,
         index=True,
     )
+    bundle_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("document_bundles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     file_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
@@ -53,4 +59,5 @@ class Document(Base):
     )
 
     tenant = relationship("Tenant", back_populates="documents")
+    bundle = relationship("DocumentBundle", back_populates="documents")
     usage_events = relationship("UsageEvent", back_populates="document")

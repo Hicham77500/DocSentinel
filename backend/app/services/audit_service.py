@@ -15,6 +15,8 @@ def log_event(
     status: str,
     fraud_score: float | None = None,
     document_type: str | None = None,
+    bundle_id: str | None = None,
+    anomaly_count: int | None = None,
     provider: str | None = None,
     event_type: str | None = None,
 ) -> None:
@@ -26,6 +28,8 @@ def log_event(
         "status": status,
         "fraud_score": fraud_score,
         "document_type": document_type,
+        "bundle_id": bundle_id,
+        "anomaly_count": anomaly_count,
         "provider": provider,
         "event_type": event_type,
     }

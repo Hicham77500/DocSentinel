@@ -45,6 +45,7 @@ class Tenant(Base):
     )
 
     api_keys = relationship("ApiKey", back_populates="tenant", cascade="all, delete-orphan")
+    document_bundles = relationship("DocumentBundle", back_populates="tenant", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="tenant", cascade="all, delete-orphan")
     usage_events = relationship("UsageEvent", back_populates="tenant", cascade="all, delete-orphan")
     subscriptions = relationship(

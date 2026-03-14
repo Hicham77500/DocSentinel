@@ -28,6 +28,12 @@ def _as_float_list(values: object) -> list[float]:
     return result
 
 
+def _as_string_list(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [str(item) for item in values]
+
+
 @router.get("/{document_id}/results", response_model=DocumentResultResponse)
 def get_document_results(
     document_id: UUID,
@@ -106,9 +112,34 @@ def get_document_results(
         if isinstance(raw_document_type, str) and raw_document_type:
             document_type = raw_document_type
 
+    bundle_crosscheck_status: str | None = None
+    bundle_anomalies: list[str] = []
+    if isinstance(gold_payload, dict):
+        raw_status = gold_payload.get("bundle_crosscheck_status")
+        if isinstance(raw_status, str) and raw_status:
+            bundle_crosscheck_status = raw_status
+        bundle_anomalies = _as_string_list(gold_payload.get("bundle_anomalies", []))
+
+    bundle_id = document.bundle_id
+    if bundle_id is not None and bundle_crosscheck_status is None:
+        crosscheck_path = f"gold/{bundle_id}/crosscheck.json"
+        try:
+            crosscheck_raw = storage_service.download_file("gold", crosscheck_path)
+            crosscheck_payload = json.loads(crosscheck_raw.decode("utf-8"))
+            if isinstance(crosscheck_payload, dict):
+                raw_status = crosscheck_payload.get("bundle_status")
+                if isinstance(raw_status, str) and raw_status:
+                    bundle_crosscheck_status = raw_status
+                bundle_anomalies = _as_string_list(crosscheck_payload.get("anomalies", []))
+        except Exception:
+            pass
+
     return DocumentResultResponse(
         document_id=document.id,
         document_type=document_type,
+        bundle_id=bundle_id,
+        bundle_crosscheck_status=bundle_crosscheck_status,
+        bundle_anomalies=bundle_anomalies,
         status=document.status,
         fraud_score=fraud_score,
         silver_path=document.silver_path,

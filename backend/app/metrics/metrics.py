@@ -20,6 +20,10 @@ documents_classified_total = Counter(
     "documents_classified_total",
     "Total number of classified documents.",
 )
+bundle_crosschecks_total = Counter(
+    "bundle_crosschecks_total",
+    "Total number of bundle cross-check executions.",
+)
 documents_failed_total = Counter(
     "documents_failed_total",
     "Total number of failed document pipelines.",

@@ -1,7 +1,7 @@
 from pathlib import Path
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.config.settings import settings
 from app.db.session import get_db
 from app.metrics.metrics import documents_uploaded_total, safe_inc
+from app.models.document_bundle import DocumentBundle
 from app.models.document import Document
 from app.models.tenant import Tenant
 from app.security.quota_enforcer import enforce_document_quota
@@ -30,6 +31,8 @@ MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024
 @router.post("/upload", response_model=UploadResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
     file: UploadFile = File(...),
+    bundle_reference: str | None = Form(default=None),
+    bundle_name: str | None = Form(default=None),
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
 ) -> UploadResponse:
@@ -78,6 +81,24 @@ async def upload_document(
     document_id = uuid.uuid4()
     filename = Path(file.filename or "document.bin").name
     raw_path = f"raw/{document_id}/{filename}"
+    reference = (bundle_reference or "").strip()
+    name = (bundle_name or "").strip()
+    bundle: DocumentBundle | None = None
+    if reference:
+        bundle = db.execute(
+            select(DocumentBundle).where(
+                DocumentBundle.tenant_id == tenant.id,
+                DocumentBundle.reference == reference,
+            )
+        ).scalar_one_or_none()
+        if bundle is None:
+            bundle = DocumentBundle(
+                tenant_id=tenant.id,
+                reference=reference,
+                name=name or reference,
+            )
+            db.add(bundle)
+            db.flush()
 
     try:
         storage_service.upload_file(
@@ -99,6 +120,7 @@ async def upload_document(
         file_hash=file_hash,
         raw_path=raw_path,
         status="queued",
+        bundle_id=bundle.id if bundle else None,
     )
     db.add(document)
     db.commit()
