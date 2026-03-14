@@ -10,6 +10,7 @@ from app.models.plan import Plan
 from app.models.subscription import Subscription
 from app.models.tenant import Tenant
 from app.models.usage_event import UsageEvent
+from app.routes.admin import router as admin_router
 from app.routes.billing import router as billing_router
 from app.routes.health import router as health_router
 from app.routes.results import router as results_router
@@ -54,3 +55,4 @@ app.include_router(status_router, prefix="/documents", tags=["documents"])
 app.include_router(results_router, prefix="/documents", tags=["documents"])
 app.include_router(usage_router, prefix="/usage", tags=["usage"])
 app.include_router(billing_router, prefix="/billing", tags=["billing"])
+app.include_router(admin_router, prefix="/admin", tags=["admin"])

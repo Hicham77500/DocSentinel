@@ -14,6 +14,9 @@ def log_event(
     document_id: str,
     status: str,
     fraud_score: float | None = None,
+    document_type: str | None = None,
+    provider: str | None = None,
+    event_type: str | None = None,
 ) -> None:
     payload = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -22,5 +25,8 @@ def log_event(
         "document_id": document_id,
         "status": status,
         "fraud_score": fraud_score,
+        "document_type": document_type,
+        "provider": provider,
+        "event_type": event_type,
     }
     logger.info(json.dumps(payload, ensure_ascii=False))

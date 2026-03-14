@@ -9,6 +9,8 @@ from app.models.tenant import Tenant
 from app.schemas.billing import CheckoutRequest, CheckoutResponse, PortalResponse, WebhookResponse
 from app.security.tenant_context import get_current_tenant
 from app.services.billing.service import get_billing_provider
+from app.services.billing.webhook_service import apply_billing_event
+from app.services.audit_service import log_event
 
 
 router = APIRouter()
@@ -66,5 +68,22 @@ async def billing_webhook(
 ) -> WebhookResponse:
     payload = await request.body()
     provider = get_billing_provider()
-    result = provider.handle_webhook(payload=payload, signature=stripe_signature)
-    return WebhookResponse(**result)
+    normalized_event = provider.handle_webhook(payload=payload, signature=stripe_signature)
+
+    tenant_id = str(normalized_event.get("tenant_id", "")) if normalized_event.get("tenant_id") else ""
+    event_type = str(normalized_event.get("event_type", ""))
+    event_status = str(normalized_event.get("status", "received"))
+    log_event(
+        event="billing_webhook_received",
+        tenant_id=tenant_id,
+        document_id="",
+        status=event_status,
+        provider=str(normalized_event.get("provider", "")),
+        event_type=event_type,
+    )
+
+    if normalized_event.get("ignored"):
+        return WebhookResponse(**normalized_event)
+
+    application_result = apply_billing_event(normalized_event)
+    return WebhookResponse(**application_result)

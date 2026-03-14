@@ -27,3 +27,7 @@ class WebhookResponse(BaseModel):
     received: bool
     verified: bool
     event_type: str
+    tenant_id: str | None = None
+    subscription_id: str | None = None
+    status: str | None = None
+    ignored: bool = False

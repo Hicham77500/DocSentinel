@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 class DocumentResultResponse(BaseModel):
     document_id: UUID
+    document_type: str
     status: str
     fraud_score: float
     silver_path: str

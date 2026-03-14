@@ -96,8 +96,19 @@ def get_document_results(
         except (TypeError, ValueError):
             pass
 
+    document_type = document.document_type or "unknown"
+    if isinstance(silver_payload, dict):
+        raw_document_type = silver_payload.get("document_type")
+        if isinstance(raw_document_type, str) and raw_document_type:
+            document_type = raw_document_type
+    if isinstance(gold_payload, dict):
+        raw_document_type = gold_payload.get("document_type")
+        if isinstance(raw_document_type, str) and raw_document_type:
+            document_type = raw_document_type
+
     return DocumentResultResponse(
         document_id=document.id,
+        document_type=document_type,
         status=document.status,
         fraud_score=fraud_score,
         silver_path=document.silver_path,

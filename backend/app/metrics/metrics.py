@@ -16,6 +16,10 @@ documents_processed_total = Counter(
     "documents_processed_total",
     "Total number of successfully processed documents.",
 )
+documents_classified_total = Counter(
+    "documents_classified_total",
+    "Total number of classified documents.",
+)
 documents_failed_total = Counter(
     "documents_failed_total",
     "Total number of failed document pipelines.",

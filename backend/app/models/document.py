@@ -1,7 +1,7 @@
 from datetime import datetime
 import uuid
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -12,6 +12,11 @@ class Document(Base):
     __tablename__ = "documents"
     __table_args__ = (
         UniqueConstraint("tenant_id", "file_hash", name="uq_documents_tenant_file_hash"),
+        CheckConstraint(
+            "document_type IS NULL OR document_type IN "
+            "('invoice', 'quote', 'certificate', 'rib', 'kbis', 'supplier_document', 'unknown')",
+            name="ck_documents_document_type",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -32,6 +37,7 @@ class Document(Base):
     bronze_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     silver_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     gold_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    document_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     fraud_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="uploaded")
     created_at: Mapped[datetime] = mapped_column(

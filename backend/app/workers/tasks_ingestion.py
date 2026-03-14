@@ -7,6 +7,7 @@ from uuid import UUID
 from app.config.settings import settings
 from app.db.session import SessionLocal
 from app.metrics.metrics import (
+    documents_classified_total,
     documents_failed_total,
     documents_processed_total,
     ocr_failures_total,
@@ -16,6 +17,7 @@ from app.metrics.metrics import (
 )
 from app.models.document import Document
 from app.services.audit_service import log_event
+from app.services.classifier import classify_document
 from app.services.extractor import extract_fields
 from app.services.fraud_detector import compute_fraud_score
 from app.services.normalizer import normalize_fields
@@ -118,6 +120,19 @@ def start_document_pipeline(self, document_id: str) -> None:
         document.status = "ocr_done"
         db.add(document)
         db.commit()
+
+        document.document_type = classify_document(extracted_text, document.original_filename)
+        db.add(document)
+        db.commit()
+        safe_inc(documents_classified_total)
+        log_event(
+            event="document_classified",
+            tenant_id=str(document.tenant_id),
+            document_id=str(document.id),
+            status=document.status,
+            document_type=document.document_type,
+        )
+
         record_usage_event(
             tenant_id=str(document.tenant_id),
             event_type="ocr_processed",
@@ -158,6 +173,7 @@ def start_document_pipeline(self, document_id: str) -> None:
         silver_path = f"silver/{document.id}/fields.json"
         silver_payload = {
             "document_id": str(document.id),
+            "document_type": document.document_type,
             "raw_path": document.raw_path,
             "bronze_path": document.bronze_path,
             "extracted": extracted_data,
@@ -173,6 +189,7 @@ def start_document_pipeline(self, document_id: str) -> None:
         gold_path = f"gold/{document.id}/fraud.json"
         gold_payload = {
             "document_id": str(document.id),
+            "document_type": document.document_type,
             "fraud_score": fraud_score,
             "anomalies": anomalies,
             "normalized": normalized_data,

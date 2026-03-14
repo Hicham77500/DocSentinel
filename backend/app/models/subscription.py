@@ -22,6 +22,7 @@ class Subscription(Base):
         nullable=False,
         index=True,
     )
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
     plan_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("plans.id", ondelete="RESTRICT"),
