@@ -6,8 +6,11 @@ from app.db.session import engine
 from app.metrics.metrics import api_requests_total, safe_inc
 from app.models.api_key import ApiKey
 from app.models.document import Document
+from app.models.plan import Plan
+from app.models.subscription import Subscription
 from app.models.tenant import Tenant
 from app.models.usage_event import UsageEvent
+from app.routes.billing import router as billing_router
 from app.routes.health import router as health_router
 from app.routes.results import router as results_router
 from app.routes.status import router as status_router
@@ -23,7 +26,14 @@ app = FastAPI(title="DocSentinel", version="0.1.0")
 def on_startup() -> None:
     Base.metadata.create_all(
         bind=engine,
-        tables=[Tenant.__table__, ApiKey.__table__, Document.__table__, UsageEvent.__table__],
+        tables=[
+            Plan.__table__,
+            Tenant.__table__,
+            Subscription.__table__,
+            ApiKey.__table__,
+            Document.__table__,
+            UsageEvent.__table__,
+        ],
     )
 
 
@@ -43,3 +53,4 @@ app.include_router(upload_router, prefix="/documents", tags=["documents"])
 app.include_router(status_router, prefix="/documents", tags=["documents"])
 app.include_router(results_router, prefix="/documents", tags=["documents"])
 app.include_router(usage_router, prefix="/usage", tags=["usage"])
+app.include_router(billing_router, prefix="/billing", tags=["billing"])

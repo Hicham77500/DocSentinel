@@ -21,6 +21,10 @@ class Settings:
     MINIO_SECURE: bool
     MINIO_RAW_BUCKET: str
     DOCSENTINEL_API_KEY: str
+    BILLING_PROVIDER: str
+    STRIPE_SECRET_KEY: str
+    STRIPE_WEBHOOK_SECRET: str
+    APP_BASE_URL: str
     ALLOWED_CONTENT_TYPES: tuple[str, ...]
 
 
@@ -41,6 +45,10 @@ def get_settings() -> Settings:
         MINIO_SECURE=_as_bool(os.getenv("MINIO_SECURE"), default=False),
         MINIO_RAW_BUCKET=os.getenv("MINIO_RAW_BUCKET", "raw"),
         DOCSENTINEL_API_KEY=os.getenv("DOCSENTINEL_API_KEY", ""),
+        BILLING_PROVIDER=os.getenv("BILLING_PROVIDER", ""),
+        STRIPE_SECRET_KEY=os.getenv("STRIPE_SECRET_KEY", ""),
+        STRIPE_WEBHOOK_SECRET=os.getenv("STRIPE_WEBHOOK_SECRET", ""),
+        APP_BASE_URL=os.getenv("APP_BASE_URL", "http://localhost:8000"),
         ALLOWED_CONTENT_TYPES=(
             "application/pdf",
             "image/jpeg",
